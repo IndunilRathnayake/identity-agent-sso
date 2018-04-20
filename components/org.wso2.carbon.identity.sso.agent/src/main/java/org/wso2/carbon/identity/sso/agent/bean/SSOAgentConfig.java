@@ -382,6 +382,20 @@ public class SSOAgentConfig {
         saml2.idPURL = properties.getProperty(SSOAgentConstants.SSOAgentConfig.SAML2.IDP_URL);
         saml2.attributeConsumingServiceIndex = properties.getProperty(
                 SSOAgentConstants.SSOAgentConfig.SAML2.ATTRIBUTE_CONSUMING_SERVICE_INDEX);
+        saml2.authnContextClassRef = properties.getProperty(
+                SSOAgentConstants.SSOAgentConfig.SAML2.AUTH_CONTEXT_CLASS_REF);
+        if(properties.getProperty(
+                SSOAgentConstants.SSOAgentConfig.SAML2.EIDAS_USER_TYPE) != null) {
+            saml2.eidasUserType = Arrays.asList(properties.getProperty(
+                    SSOAgentConstants.SSOAgentConfig.SAML2.EIDAS_USER_TYPE).split(","));
+        }
+        if(properties.getProperty(
+                SSOAgentConstants.SSOAgentConfig.SAML2.EIDAS_OPTIONAL_ATTRIBUTES) != null) {
+            saml2.eidasOptionalAttributes = Arrays.asList(properties.getProperty(
+                    SSOAgentConstants.SSOAgentConfig.SAML2.EIDAS_OPTIONAL_ATTRIBUTES).split(","));
+        }
+        saml2.authnContextComparisonType = properties.getProperty(
+                SSOAgentConstants.SSOAgentConfig.SAML2.AUTH_CONTEXT_COMPARISON_TYPE);
 
         String isSLOEnabledString = properties.getProperty(
                 SSOAgentConstants.SSOAgentConfig.SAML2.ENABLE_SLO);
@@ -726,6 +740,10 @@ public class SSOAgentConfig {
         private String relayState = null;
         private String signatureValidatorImplClass = null;
         private int timeStampSkewInSeconds = 300;
+        private String authnContextClassRef = null;
+        private List<String> eidasUserType = null;
+        private List<String> eidasOptionalAttributes = null;
+        private String authnContextComparisonType = null;
         /**
          * The html page that will auto-submit the SAML2 to the IdP.
          * This should be in valid HTML syntax, with following section within the
@@ -880,6 +898,38 @@ public class SSOAgentConfig {
 
         public int getTimeStampSkewInSeconds() {
             return timeStampSkewInSeconds;
+        }
+
+        public String getAuthnContextClassRef() {
+            return authnContextClassRef;
+        }
+
+        public void setAuthnContextClassRef(String authnContextClassRef) {
+            this.authnContextClassRef = authnContextClassRef;
+        }
+
+        public String getAuthnContextComparisonType() {
+            return authnContextComparisonType;
+        }
+
+        public void setAuthnContextComparisonType(String authnContextComparisonType) {
+            this.authnContextComparisonType = authnContextComparisonType;
+        }
+
+        public List<String> getEidasUserType() {
+            return eidasUserType;
+        }
+
+        public void setEidasUserType(List<String> eidasUserType) {
+            this.eidasUserType = eidasUserType;
+        }
+
+        public List<String> getEidasOptionalAttributes() {
+            return eidasOptionalAttributes;
+        }
+
+        public void setEidasOptionalAttributes(List<String> eidasOptionalAttributes) {
+            this.eidasOptionalAttributes = eidasOptionalAttributes;
         }
     }
 

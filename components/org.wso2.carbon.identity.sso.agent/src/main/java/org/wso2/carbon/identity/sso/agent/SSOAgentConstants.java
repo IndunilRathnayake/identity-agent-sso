@@ -104,6 +104,11 @@ public class SSOAgentConstants {
                     "SAML2.PostBindingRequestHTMLFilePath";
             public static final String SIGNATURE_VALIDATOR = "SAML2.SignatureValidatorImplClass";
             public static final String TIME_STAMP_SKEW = "SAML2.TimestampSkew";
+            public static final String AUTH_CONTEXT_CLASS_REF =  "SAML2.AuthnContextClassRef";
+
+            public static final String EIDAS_USER_TYPE = "SAML2.EidasUserType";
+            public static final String EIDAS_OPTIONAL_ATTRIBUTES = "SAML2.EidasOptionalAttributes";
+            public static final String AUTH_CONTEXT_COMPARISON_TYPE = "SAML2.AuthnContextComparisonType";
 
             private SAML2() {
             }

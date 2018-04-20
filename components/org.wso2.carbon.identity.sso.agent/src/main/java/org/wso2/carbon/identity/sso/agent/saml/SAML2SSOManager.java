@@ -30,6 +30,8 @@ import org.opensaml.common.SAMLVersion;
 import org.opensaml.common.SignableSAMLObject;
 import org.opensaml.common.xml.SAMLConstants;
 import org.opensaml.saml2.common.Extensions;
+import org.opensaml.saml2.common.impl.ExtensionsBuilder;
+import org.opensaml.saml2.common.impl.ExtensionsMarshaller;
 import org.opensaml.saml2.core.Assertion;
 import org.opensaml.saml2.core.Attribute;
 import org.opensaml.saml2.core.AttributeStatement;
@@ -66,9 +68,16 @@ import org.opensaml.saml2.core.impl.StatusCodeBuilder;
 import org.opensaml.saml2.core.impl.StatusMessageBuilder;
 import org.opensaml.saml2.ecp.RelayState;
 import org.opensaml.saml2.encryption.Decrypter;
+import org.opensaml.saml2.metadata.impl.RequestedAttributeMarshaller;
 import org.opensaml.security.SAMLSignatureProfileValidator;
+import org.opensaml.xml.Namespace;
 import org.opensaml.xml.XMLObject;
+import org.opensaml.xml.XMLObjectBuilder;
+import org.opensaml.xml.XMLObjectBuilderFactory;
+import org.opensaml.xml.encryption.AbstractEncryptedKeyResolver;
 import org.opensaml.xml.encryption.EncryptedKey;
+import org.opensaml.xml.encryption.InlineEncryptedKeyResolver;
+import org.opensaml.xml.encryption.SimpleKeyInfoReferenceEncryptedKeyResolver;
 import org.opensaml.xml.io.Marshaller;
 import org.opensaml.xml.io.MarshallerFactory;
 import org.opensaml.xml.io.MarshallingException;
@@ -89,8 +98,6 @@ import org.w3c.dom.bootstrap.DOMImplementationRegistry;
 import org.w3c.dom.ls.DOMImplementationLS;
 import org.w3c.dom.ls.LSOutput;
 import org.w3c.dom.ls.LSSerializer;
-import org.wso2.carbon.context.PrivilegedCarbonContext;
-import org.wso2.carbon.identity.base.IdentityException;
 import org.wso2.carbon.identity.sso.agent.InvalidSessionException;
 import org.wso2.carbon.identity.sso.agent.SSOAgentConstants;
 import org.wso2.carbon.identity.sso.agent.SSOAgentDataHolder;
@@ -100,24 +107,19 @@ import org.wso2.carbon.identity.sso.agent.bean.SSOAgentConfig;
 import org.wso2.carbon.identity.sso.agent.util.SAMLSignatureValidator;
 import org.wso2.carbon.identity.sso.agent.util.SSOAgentUtils;
 import org.apache.commons.collections.CollectionUtils;
-import org.wso2.carbon.user.api.UserStoreException;
-import org.wso2.carbon.utils.multitenancy.MultitenantConstants;
 
 import javax.crypto.SecretKey;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
+import javax.xml.namespace.QName;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
-import java.util.HashMap;
-import java.util.List;
-import java.util.ArrayList;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.zip.Deflater;
@@ -187,7 +189,7 @@ public class SAML2SSOManager {
         String idpUrl = null;
 
         String encodedRequestMessage = encodeRequestMessage(
-                requestMessage, SAMLConstants.SAML2_REDIRECT_BINDING_URI);
+                requestMessage, SAMLConstants.SAML2_ARTIFACT_BINDING_URI);
         StringBuilder httpQueryString = new StringBuilder(
                 SSOAgentConstants.SAML2SSO.HTTP_POST_PARAM_SAML2_AUTH_REQ +
                         "=" + encodedRequestMessage);
@@ -273,7 +275,7 @@ public class SAML2SSOManager {
                 throw new SSOAgentException("SLO Request can not be built. SSO Session is null");
             }
         }
-        String encodedRequestMessage = encodeRequestMessage(requestMessage, SAMLConstants.SAML2_POST_BINDING_URI);
+        String encodedRequestMessage = encodeRequestMessage(requestMessage, SAMLConstants.SAML2_ARTIFACT_BINDING_URI);
 
         Map<String, String[]> paramsMap = new HashMap<String, String[]>();
         paramsMap.put(SSOAgentConstants.SAML2SSO.HTTP_POST_PARAM_SAML2_AUTH_REQ,
@@ -328,7 +330,7 @@ public class SAML2SSOManager {
 
     public String buildPostResponse(SignableSAMLObject requestMessage) throws SSOAgentException {
 
-        return encodeRequestMessage(requestMessage, SAMLConstants.SAML2_POST_BINDING_URI);
+        return encodeRequestMessage(requestMessage, SAMLConstants.SAML2_ARTIFACT_BINDING_URI);
     }
 
     public void processResponse(HttpServletRequest request, HttpServletResponse response)
@@ -598,14 +600,97 @@ public class SAML2SSOManager {
                 authnContextClassRefBuilder.buildObject("urn:oasis:names:tc:SAML:2.0:assertion",
                         "AuthnContextClassRef",
                         "saml");
-        authnContextClassRef.setAuthnContextClassRef("urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport");
+        authnContextClassRef.setAuthnContextClassRef(ssoAgentConfig.getSAML2().getAuthnContextClassRef());
 
 		/* AuthnContex */
         RequestedAuthnContextBuilder requestedAuthnContextBuilder =
                 new RequestedAuthnContextBuilder();
         RequestedAuthnContext requestedAuthnContext = requestedAuthnContextBuilder.buildObject();
-        requestedAuthnContext.setComparison(AuthnContextComparisonTypeEnumeration.EXACT);
+        requestedAuthnContext.setComparison(AuthnContextComparisonTypeEnumeration.MINIMUM);
         requestedAuthnContext.getAuthnContextClassRefs().add(authnContextClassRef);
+
+        Extensions extensions = (new ExtensionsBuilder())
+                .buildObject("urn:oasis:names:tc:SAML:2.0:protocol", "Extensions", "samlp");
+
+        XMLObjectBuilderFactory builderFactory = Configuration.getBuilderFactory();
+        builderFactory.registerBuilder(RequestedAttributes.DEFAULT_ELEMENT_NAME , new RequestedAttributesBuilder());
+        builderFactory.registerBuilder(RequestedAttribute.DEFAULT_ELEMENT_NAME , new RequestedAttributeBuilder());
+        //builderFactory.registerBuilder(SPType.DEFAULT_ELEMENT_NAME , new SPTypeBuilder());
+
+        MarshallerFactory marshallerFactory = Configuration.getMarshallerFactory();
+        marshallerFactory.registerMarshaller(RequestedAttributes.DEFAULT_ELEMENT_NAME , new RequestedAttributesMarshaller());
+        marshallerFactory.registerMarshaller(RequestedAttribute.DEFAULT_ELEMENT_NAME , new RequestedAttributeMarshaller());
+        marshallerFactory.registerMarshaller(SPType.DEFAULT_ELEMENT_NAME , new SPTypeMarshaller());
+        marshallerFactory.registerMarshaller(XMLHelper.constructQName("urn:oasis:names:tc:SAML:2.0:protocol", "Extensions", "samlp"),
+                new ExtensionsMarshaller());
+
+        // Add the type of SP as an extension.
+        //
+        /*SPType spTypeElement = createSamlObject(builderFactory, SPType.class, SPType.DEFAULT_ELEMENT_NAME);
+        spTypeElement.setType(SPTypeEnumeration.PUBLIC);
+        extensions.getUnknownXMLObjects().add(spTypeElement);*/
+
+        // Add the eIDAS requested attributes as an extension.
+        Map<String, String> requstedAttributes = new HashMap<>();
+
+        List<String> userTypes = ssoAgentConfig.getSAML2().getEidasUserType();
+        List<String> additionalAttrs = ssoAgentConfig.getSAML2().getEidasOptionalAttributes();
+
+        Map<String, String> mandatoryAttributes1 = new HashMap<>();
+        mandatoryAttributes1.put(AttributeConstants.EIDAS_PERSON_IDENTIFIER_ATTRIBUTE_NAME,
+                AttributeConstants.EIDAS_PERSON_IDENTIFIER_ATTRIBUTE_FRIENDLY_NAME);
+        mandatoryAttributes1.put(AttributeConstants.EIDAS_DATE_OF_BIRTH_ATTRIBUTE_NAME,
+                AttributeConstants.EIDAS_DATE_OF_BIRTH_ATTRIBUTE_FRIENDLY_NAME);
+        mandatoryAttributes1.put(AttributeConstants.EIDAS_CURRENT_FAMILY_NAME_ATTRIBUTE_NAME,
+                AttributeConstants.EIDAS_CURRENT_FAMILY_NAME_ATTRIBUTE_FRIENDLY_NAME);
+        mandatoryAttributes1.put(AttributeConstants.EIDAS_CURRENT_GIVEN_NAME_ATTRIBUTE_NAME,
+                AttributeConstants.EIDAS_CURRENT_GIVEN_NAME_ATTRIBUTE_FRIENDLY_NAME);
+
+        Map<String, String> mandatoryAttributes2 = new HashMap<>();
+        mandatoryAttributes2.put(AttributeConstants.EIDAS_LEGAL_PID_ATTRIBUTE_NAME,
+                AttributeConstants.EIDAS_LEGAL_PID_ATTRIBUTE_FRIENDLY_NAME);
+        mandatoryAttributes2.put(AttributeConstants.EIDAS_LEGAL_NAME_ATTRIBUTE_NAME,
+                AttributeConstants.EIDAS_LEGAL_NAME_ATTRIBUTE_FRIENDLY_NAME);
+
+        if(userTypes != null) {
+            for (String userType : userTypes) {
+                if (userType.equals("natural")) {
+                    requstedAttributes.putAll(mandatoryAttributes1);
+                } else if (userType.equals("legal")) {
+                    requstedAttributes.putAll(mandatoryAttributes2);
+                }
+            }
+        }
+
+        RequestedAttributes requestedAttributesElement = createSamlObject(builderFactory, RequestedAttributes.class,
+                RequestedAttributes.DEFAULT_ELEMENT_NAME);
+
+        if (requstedAttributes != null && !requstedAttributes.isEmpty()) {
+            // Also see the RequestedAttributeTemplates class ...
+            for (Map.Entry<String, String> entry : requstedAttributes.entrySet()) {
+                RequestedAttribute reqAttr = createSamlObject(builderFactory, RequestedAttribute.class,
+                        RequestedAttribute.DEFAULT_ELEMENT_NAME);
+                reqAttr.setName(entry.getKey());
+                reqAttr.setNameFormat(Attribute.URI_REFERENCE);
+                reqAttr.setIsRequired(true);
+                reqAttr.setFriendlyName(entry.getValue());
+                requestedAttributesElement.getRequestedAttributes().add((
+                        org.wso2.carbon.identity.sso.agent.saml.RequestedAttribute) reqAttr);
+            }
+        }
+
+        if(additionalAttrs != null) {
+            for (String additionalAttr : additionalAttrs) {
+                RequestedAttribute reqAttr = createSamlObject(builderFactory, RequestedAttribute.class,
+                        RequestedAttribute.DEFAULT_ELEMENT_NAME);
+                reqAttr.setName(additionalAttr);
+                reqAttr.setNameFormat(Attribute.URI_REFERENCE);
+                reqAttr.setIsRequired(false);
+                requestedAttributesElement.getRequestedAttributes().add((
+                        org.wso2.carbon.identity.sso.agent.saml.RequestedAttribute) reqAttr);
+            }
+        }
+        extensions.getUnknownXMLObjects().add(requestedAttributesElement);
 
         DateTime issueInstant = new DateTime();
 
@@ -615,6 +700,10 @@ public class SAML2SSOManager {
                 authRequestBuilder.buildObject("urn:oasis:names:tc:SAML:2.0:protocol",
                         "AuthnRequest", "samlp");
 
+        //authRequest.getNamespaces().add(new Namespace("http://eidas.europa.eu/saml-extensions", "eidas"));
+        authRequest.addNamespace(new Namespace("http://eidas.europa.eu/saml-extensions", "eidas"));
+
+
         authRequest.setForceAuthn(ssoAgentConfig.getSAML2().isForceAuthn());
         authRequest.setIsPassive(ssoAgentConfig.getSAML2().isPassiveAuthn());
         authRequest.setIssueInstant(issueInstant);
@@ -623,6 +712,7 @@ public class SAML2SSOManager {
         authRequest.setIssuer(issuer);
         authRequest.setNameIDPolicy(nameIdPolicy);
         authRequest.setRequestedAuthnContext(requestedAuthnContext);
+        authRequest.setExtensions(extensions);
         authRequest.setID(SSOAgentUtils.createID());
         authRequest.setVersion(SAMLVersion.VERSION_20);
         authRequest.setDestination(ssoAgentConfig.getSAML2().getIdPURL());
@@ -649,7 +739,7 @@ public class SAML2SSOManager {
             authDOM = marshaller.marshall(requestMessage);
             StringWriter rspWrt = new StringWriter();
             XMLHelper.writeNode(authDOM, rspWrt);
-            if (SAMLConstants.SAML2_REDIRECT_BINDING_URI.equals(binding)) {
+            if (SAMLConstants.SAML2_ARTIFACT_BINDING_URI.equals(binding)) {
                 //Compress the message, Base 64 encode and URL encode
                 Deflater deflater = new Deflater(Deflater.DEFLATED, true);
                 ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
@@ -937,5 +1027,43 @@ public class SAML2SSOManager {
         }
 
         return stat;
+    }
+
+    /**
+     * Utility method for creating an OpenSAML object given its element name.
+     *
+     * @param clazz
+     *          the class to create
+     * @param elementName
+     *          the element name for the XML object to create
+     * @return the XML object
+     */
+    public static <T extends XMLObject> T createSamlObject(XMLObjectBuilderFactory builderFactory, Class<T> clazz, QName elementName) {
+        if (!XMLObject.class.isAssignableFrom(clazz)) {
+            throw new RuntimeException(String.format("%s is not a XMLObject class", clazz.getName()));
+        }
+        XMLObjectBuilder<?> builder = builderFactory.getBuilder(elementName);
+        if (builder == null) {
+            // No builder registered for the given element name. Try creating a builder for the default element name.
+            builder = builderFactory.getBuilder(getDefaultElementName(clazz));
+        }
+        Object object = builder.buildObject(elementName);
+        return clazz.cast(object);
+    }
+
+    /**
+     * Returns the default element name for the supplied class
+     *
+     * @param clazz
+     *          class to check
+     * @return the default QName
+     */
+    public static <T extends XMLObject> QName getDefaultElementName(Class<T> clazz) {
+        try {
+            return (QName) clazz.getDeclaredField("DEFAULT_ELEMENT_NAME").get(null);
+        }
+        catch (NoSuchFieldException | IllegalArgumentException | IllegalAccessException | SecurityException e) {
+            throw new RuntimeException(e);
+        }
     }
 }
